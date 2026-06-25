@@ -8,8 +8,8 @@ const io = new Server(server);
 
 app.use(express.static('public'));
 
-// Store current video for each room
-const roomVideos = {};
+// roomData: { videoId, currentTime }
+const roomData = {};
 
 io.on('connection', (socket) => {
   console.log('a user connected:', socket.id);
@@ -25,11 +25,11 @@ io.on('connection', (socket) => {
     if (room && room.size > 0) {
       socket.join(roomId);
       socket.emit('room-joined', roomId);
-      socket.to(roomId).emit('user-joined', socket.id);
 
-      // Send the current video ID if one is loaded
-      if (roomVideos[roomId]) {
-        socket.emit('current-video', roomVideos[roomId]);
+      // Send current video ID AND time if available
+      const data = roomData[roomId];
+      if (data) {
+        socket.emit('current-video', data);
       }
       console.log(`${socket.id} joined room ${roomId}`);
     } else {
@@ -42,11 +42,22 @@ io.on('connection', (socket) => {
     const roomId = data[0];
     const command = data[1];
 
-    // Save video ID when host loads a new video
+    // Update stored video & time
+    if (!roomData[roomId]) roomData[roomId] = {};
     if (command.action === 'load') {
-      roomVideos[roomId] = command.videoId;
+      roomData[roomId].videoId = command.videoId;
+      roomData[roomId].currentTime = 0;
+    } else if (command.action === 'play' || command.action === 'pause' || command.action === 'seek') {
+      if (command.currentTime !== undefined) {
+        roomData[roomId].currentTime = command.currentTime;
+      } else if (command.time !== undefined) {
+        roomData[roomId].currentTime = command.time;
+      }
+    } else if (command.action === 'sync') {
+      roomData[roomId].currentTime = command.time;
     }
 
+    // Broadcast to all other clients in the room
     socket.to(roomId).emit('sync-command', command);
   });
 

@@ -36,22 +36,27 @@ class _HomeScreenState extends State<HomeScreen> {
     final roomId =
         DateTime.now().millisecondsSinceEpoch.toRadixString(36).substring(2, 8);
     Navigator.push(
-        context,
-        MaterialPageRoute(
-            builder: (_) => RoomScreen(roomId: roomId, isHost: true)));
+      context,
+      MaterialPageRoute(
+        builder: (_) => RoomScreen(roomId: roomId, isHost: true),
+      ),
+    );
   }
 
   void _joinRoom() {
     final id = _roomController.text.trim();
     if (id.isEmpty) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Enter a room ID')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter a room ID')),
+      );
       return;
     }
     Navigator.push(
-        context,
-        MaterialPageRoute(
-            builder: (_) => RoomScreen(roomId: id, isHost: false)));
+      context,
+      MaterialPageRoute(
+        builder: (_) => RoomScreen(roomId: id, isHost: false),
+      ),
+    );
   }
 
   @override
@@ -64,31 +69,37 @@ class _HomeScreenState extends State<HomeScreen> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             ElevatedButton.icon(
-                onPressed: _createRoom,
-                icon: const Icon(Icons.add),
-                label: const Text('Create a Room'),
-                style: ElevatedButton.styleFrom(
-                    minimumSize: const Size.fromHeight(50),
-                    backgroundColor: Colors.red,
-                    foregroundColor: Colors.white)),
+              onPressed: _createRoom,
+              icon: const Icon(Icons.add),
+              label: const Text('Create a Room'),
+              style: ElevatedButton.styleFrom(
+                minimumSize: const Size.fromHeight(50),
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+              ),
+            ),
             const SizedBox(height: 30),
             const Text('OR', style: TextStyle(fontSize: 18)),
             const SizedBox(height: 20),
             TextField(
-                controller: _roomController,
-                decoration: const InputDecoration(
-                    hintText: 'Enter Room ID',
-                    border: OutlineInputBorder(),
-                    contentPadding: EdgeInsets.symmetric(horizontal: 16))),
+              controller: _roomController,
+              decoration: const InputDecoration(
+                hintText: 'Enter Room ID',
+                border: OutlineInputBorder(),
+                contentPadding: EdgeInsets.symmetric(horizontal: 16),
+              ),
+            ),
             const SizedBox(height: 15),
             ElevatedButton.icon(
-                onPressed: _joinRoom,
-                icon: const Icon(Icons.login),
-                label: const Text('Join Room'),
-                style: ElevatedButton.styleFrom(
-                    minimumSize: const Size.fromHeight(50),
-                    backgroundColor: Colors.red,
-                    foregroundColor: Colors.white)),
+              onPressed: _joinRoom,
+              icon: const Icon(Icons.login),
+              label: const Text('Join Room'),
+              style: ElevatedButton.styleFrom(
+                minimumSize: const Size.fromHeight(50),
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+              ),
+            ),
           ],
         ),
       ),
@@ -111,9 +122,7 @@ class _RoomScreenState extends State<RoomScreen> {
   bool _isLoading = true;
   String? _loadedVideoId;
   final _urlController = TextEditingController();
-  Timer? _forceShowTimer;
   bool _isFullscreen = false;
-  Map<String, dynamic>? _pendingCommand;
 
   @override
   void initState() {
@@ -122,16 +131,6 @@ class _RoomScreenState extends State<RoomScreen> {
     _createWebViewController();
     _connectSocket();
     if (widget.isHost) _startPeriodicSync();
-
-    _forceShowTimer = Timer(const Duration(seconds: 8), () {
-      if (mounted && _isLoading) {
-        setState(() => _isLoading = false);
-        if (_loadedVideoId != null) {
-          _webViewController.runJavaScript('loadVideo("$_loadedVideoId")');
-          _enterFullscreen();
-        }
-      }
-    });
   }
 
   void _setOrientationPortrait() {
@@ -141,8 +140,10 @@ class _RoomScreenState extends State<RoomScreen> {
 
   void _enterFullscreen() {
     if (!mounted) return;
-    SystemChrome.setPreferredOrientations(
-        [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     setState(() => _isFullscreen = true);
   }
@@ -156,13 +157,13 @@ class _RoomScreenState extends State<RoomScreen> {
     _webViewController = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(Colors.black)
-      ..addJavaScriptChannel('FlutterBridge',
-          onMessageReceived: _onWebViewMessage)
-      ..loadRequest(
-          Uri.parse('$SERVER_URL/player.html')); // loads sync.js automatically
+      ..addJavaScriptChannel(
+        'FlutterBridge',
+        onMessageReceived: _onWebViewMessage,
+      )
+      ..loadRequest(Uri.parse('$SERVER_URL/player.html'));
 
-    // Poll for __playerReady
-    Timer.periodic(const Duration(milliseconds: 300), (_) async {
+    Timer.periodic(const Duration(milliseconds: 500), (_) async {
       if (!mounted || _webViewReady) return;
       try {
         final res = await _webViewController
@@ -173,16 +174,10 @@ class _RoomScreenState extends State<RoomScreen> {
             _webViewReady = true;
             _isLoading = false;
           });
-          _forceShowTimer?.cancel();
-          // Set host role in JS
           _webViewController.runJavaScript('window.setHost(${widget.isHost})');
-          if (_pendingCommand != null) {
-            _webViewController.runJavaScript(
-                'applySyncCommand(${jsonEncode(_pendingCommand)})');
-            _pendingCommand = null;
-          }
           if (_loadedVideoId != null) {
-            _webViewController.runJavaScript('loadVideo("$_loadedVideoId")');
+            _webViewController
+                .runJavaScript('window.loadVideo("$_loadedVideoId")');
             _enterFullscreen();
           }
         }
@@ -195,100 +190,118 @@ class _RoomScreenState extends State<RoomScreen> {
   void _connectSocket() {
     socket = IO.io(SERVER_URL, <String, dynamic>{
       'transports': ['websocket'],
-      'autoConnect': true
+      'autoConnect': true,
     });
 
     socket.onConnect((_) {
       debugPrint('✅ Connected to server');
-      if (widget.isHost)
+      if (widget.isHost) {
         socket.emit('create-room', widget.roomId);
-      else
+      } else {
         socket.emit('join-room', widget.roomId);
+      }
     });
 
     socket.on('room-created', (_) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Room created: ${widget.roomId}')));
+          SnackBar(content: Text('Room created: ${widget.roomId}')),
+        );
+      }
     });
 
     socket.on('room-joined', (_) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Joined room successfully')));
+          const SnackBar(content: Text('Joined room successfully')),
+        );
+      }
     });
 
     socket.on('room-error', (data) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(data.toString())));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(data.toString())),
+        );
         Navigator.pop(context);
       }
     });
 
-    socket.on('current-video', (videoId) {
-      _loadedVideoId = videoId as String;
-      _webViewController.runJavaScript('loadVideo("$videoId")');
+    // Viewer receives current video + time
+    socket.on('current-video', (data) {
+      final videoId = data['videoId'] as String;
+      final time = (data['currentTime'] as num?)?.toDouble() ?? 0.0;
+      _loadedVideoId = videoId;
+      debugPrint('Received current-video: $videoId, time: $time');
+      // Use the new function in sync.js
+      _webViewController.runJavaScript(
+        'window.setCurrentVideo("$videoId", $time)',
+      );
       if (_isLoading) setState(() => _isLoading = false);
       _enterFullscreen();
     });
 
     if (!widget.isHost) {
       socket.on('sync-command', (cmd) {
-        if (!_webViewReady) {
-          _pendingCommand = cmd as Map<String, dynamic>;
-          return;
-        }
-        _webViewController
-            .runJavaScript('applySyncCommand(${jsonEncode(cmd)})');
+        final command = cmd as Map<String, dynamic>;
+        debugPrint('Sync command received: $command');
+        _webViewController.runJavaScript(
+          'window.applySyncCommand(${jsonEncode(command)})',
+        );
       });
     }
   }
 
-  // Host actions
+  // Host buttons
   Future<void> _hostPlay() async {
+    if (!widget.isHost || !_webViewReady) return;
     final timeJs = await _webViewController
         .runJavaScriptReturningResult('window.__currentTime');
     final time = double.tryParse(timeJs.toString()) ?? 0.0;
     socket.emit('host-command', [
       widget.roomId,
-      {'action': 'play', 'currentTime': time}
+      {'action': 'play', 'currentTime': time},
     ]);
-    _webViewController.runJavaScript('playVideo()');
+    _webViewController.runJavaScript('window.playVideo()');
   }
 
   Future<void> _hostPause() async {
+    if (!widget.isHost || !_webViewReady) return;
     final timeJs = await _webViewController
         .runJavaScriptReturningResult('window.__currentTime');
     final time = double.tryParse(timeJs.toString()) ?? 0.0;
     socket.emit('host-command', [
       widget.roomId,
-      {'action': 'pause', 'time': time}
+      {'action': 'pause', 'time': time},
     ]);
-    _webViewController.runJavaScript('pauseVideo()');
+    _webViewController.runJavaScript('window.pauseVideo()');
   }
 
   void _loadVideo() {
     final url = _urlController.text.trim();
     final videoId = _extractVideoId(url);
     if (videoId == null) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Invalid YouTube URL')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Invalid YouTube URL')),
+      );
       return;
     }
     _loadedVideoId = videoId;
+
     socket.emit('host-command', [
       widget.roomId,
-      {'action': 'load', 'videoId': videoId}
+      {'action': 'load', 'videoId': videoId},
     ]);
-    _webViewController.runJavaScript('loadVideo("$videoId")');
+
+    _webViewController.runJavaScript('window.loadVideo("$videoId")');
     if (_isLoading) setState(() => _isLoading = false);
     _enterFullscreen();
   }
 
   String? _extractVideoId(String url) {
     final regex = RegExp(
-        r'(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})');
+      r'(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})',
+    );
     final match = regex.firstMatch(url);
     return match?.group(1);
   }
@@ -296,13 +309,23 @@ class _RoomScreenState extends State<RoomScreen> {
   void _onWebViewMessage(JavaScriptMessage message) {
     final msg = message.message;
     debugPrint('WebView msg: $msg');
-    // state changes are handled inside sync.js and sent as socket commands from host
-    // so nothing needed here besides logging
+    if (msg == 'playerReady') {
+      if (_isLoading) {
+        setState(() {
+          _webViewReady = true;
+          _isLoading = false;
+        });
+        _webViewController.runJavaScript('window.setHost(${widget.isHost})');
+        if (_loadedVideoId != null) {
+          _webViewController
+              .runJavaScript('window.loadVideo("$_loadedVideoId")');
+          _enterFullscreen();
+        }
+      }
+    }
   }
 
   void _startPeriodicSync() {
-    // The periodic sync is already handled by the host's client.js (web) or by our host logic?
-    // For Flutter host, we also send a sync every 3 seconds
     Timer.periodic(const Duration(seconds: 3), (timer) {
       if (!mounted || !widget.isHost || !_webViewReady) return;
       _webViewController
@@ -311,7 +334,7 @@ class _RoomScreenState extends State<RoomScreen> {
         final time = double.tryParse(timeJs.toString()) ?? 0.0;
         socket.emit('host-command', [
           widget.roomId,
-          {'action': 'sync', 'time': time}
+          {'action': 'sync', 'time': time},
         ]);
       }).catchError((_) {});
     });
@@ -339,17 +362,22 @@ class _RoomScreenState extends State<RoomScreen> {
                 child: Row(
                   children: [
                     Expanded(
-                        child: TextField(
-                            controller: _urlController,
-                            decoration: const InputDecoration(
-                                hintText: 'Paste YouTube URL',
-                                border: OutlineInputBorder()))),
+                      child: TextField(
+                        controller: _urlController,
+                        decoration: const InputDecoration(
+                          hintText: 'Paste YouTube URL',
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                    ),
                     const SizedBox(width: 10),
                     ElevatedButton(
-                        onPressed: _loadVideo,
-                        style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.red),
-                        child: const Text('Load')),
+                      onPressed: _loadVideo,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red,
+                      ),
+                      child: const Text('Load'),
+                    ),
                   ],
                 ),
               ),
@@ -358,10 +386,10 @@ class _RoomScreenState extends State<RoomScreen> {
                 children: [
                   if (_isLoading)
                     const Center(
-                        child: CircularProgressIndicator(color: Colors.red))
+                      child: CircularProgressIndicator(color: Colors.red),
+                    )
                   else
                     WebViewWidget(controller: _webViewController),
-                  // Custom Play / Pause overlay
                   if (widget.isHost && !_isLoading)
                     Positioned(
                       bottom: 20,
@@ -370,20 +398,21 @@ class _RoomScreenState extends State<RoomScreen> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           FloatingActionButton(
-                              heroTag: 'play',
-                              mini: true,
-                              backgroundColor: Colors.white70,
-                              onPressed: _hostPlay,
-                              child: const Icon(Icons.play_arrow,
-                                  color: Colors.black)),
+                            heroTag: 'play',
+                            mini: true,
+                            backgroundColor: Colors.white.withOpacity(0.7),
+                            onPressed: _hostPlay,
+                            child: const Icon(Icons.play_arrow,
+                                color: Colors.black),
+                          ),
                           const SizedBox(height: 10),
                           FloatingActionButton(
-                              heroTag: 'pause',
-                              mini: true,
-                              backgroundColor: Colors.white70,
-                              onPressed: _hostPause,
-                              child:
-                                  const Icon(Icons.pause, color: Colors.black)),
+                            heroTag: 'pause',
+                            mini: true,
+                            backgroundColor: Colors.white.withOpacity(0.7),
+                            onPressed: _hostPause,
+                            child: const Icon(Icons.pause, color: Colors.black),
+                          ),
                         ],
                       ),
                     ),
@@ -398,7 +427,6 @@ class _RoomScreenState extends State<RoomScreen> {
 
   @override
   void dispose() {
-    _forceShowTimer?.cancel();
     _urlController.dispose();
     socket.disconnect();
     _setOrientationPortrait();
