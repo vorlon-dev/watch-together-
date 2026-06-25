@@ -1,4 +1,3 @@
-<!-- public/player.html -->
 <!DOCTYPE html>
 <html>
 <head>
@@ -7,86 +6,11 @@
     body, html { margin:0; padding:0; width:100%; height:100%; background:#000; overflow:hidden; }
     #player-frame { width:100%; height:100%; border:none; }
     #loading-msg { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); color:#fff; font-size:18px; }
-    #error-msg { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); color:red; font-size:16px; display:none; }
   </style>
 </head>
 <body>
-  <div id="loading-msg">Loading player...</div>
-  <div id="error-msg"></div>
+  <div id="loading-msg">Loading player…</div>
   <iframe id="player-frame" allowfullscreen></iframe>
-
-  <script>
-    var origin = window.location.origin;   // will be https://watch-together-iti4.onrender.com
-    window.__playerReady = false;
-    var player = document.getElementById('player-frame');
-    var loadingDiv = document.getElementById('loading-msg');
-    var errorDiv = document.getElementById('error-msg');
-
-    function showError(msg) {
-      loadingDiv.style.display = 'none';
-      errorDiv.style.display = 'block';
-      errorDiv.textContent = msg;
-      window.__playerReady = true;
-      if (window.FlutterBridge) {
-        FlutterBridge.postMessage(JSON.stringify({event: 'error', message: msg}));
-      }
-    }
-
-    window.addEventListener('message', function(event) {
-      if (event.origin !== 'https://www.youtube.com') return;
-      try {
-        var data = JSON.parse(event.data);
-        if (data.event === 'onReady') {
-          window.__playerReady = true;
-          loadingDiv.style.display = 'none';
-          errorDiv.style.display = 'none';
-          if (window.FlutterBridge) {
-            FlutterBridge.postMessage('playerReady');
-          }
-        } else if (data.event === 'onStateChange') {
-          if (window.FlutterBridge) {
-            FlutterBridge.postMessage(JSON.stringify({
-              event: 'stateChange',
-              state: data.info,
-              time: 0
-            }));
-          }
-        }
-      } catch(e) {}
-    });
-
-    function loadVideo(videoId) {
-      loadingDiv.style.display = 'block';
-      errorDiv.style.display = 'none';
-      var src = 'https://www.youtube.com/embed/' + videoId + '?enablejsapi=1&origin=' + encodeURIComponent(origin) + '&controls=1&playsinline=1';
-      player.src = src;
-
-      setTimeout(function() {
-        if (!window.__playerReady) {
-          window.__playerReady = true;
-          loadingDiv.style.display = 'none';
-          if (window.FlutterBridge) {
-            FlutterBridge.postMessage('playerReady');
-          }
-        }
-      }, 5000);
-    }
-
-    function playVideo() {
-      if (player.contentWindow) {
-        player.contentWindow.postMessage('{"event":"command","func":"playVideo","args":""}', '*');
-      }
-    }
-    function pauseVideo() {
-      if (player.contentWindow) {
-        player.contentWindow.postMessage('{"event":"command","func":"pauseVideo","args":""}', '*');
-      }
-    }
-    function seekTo(seconds) {
-      if (player.contentWindow) {
-        player.contentWindow.postMessage('{"event":"command","func":"seekTo","args":' + seconds + '}', '*');
-      }
-    }
-  </script>
+  <script src="sync.js"></script>
 </body>
 </html>
