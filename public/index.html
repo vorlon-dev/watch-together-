@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Watch Together</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Room controls (shown before joining) -->
+    <div id="room-controls">
+      <h1>Watch Together</h1>
+      <div id="room-actions">
+        <button id="create-room-btn">Create a Room</button>
+        <div>
+          <input type="text" id="room-id-input" placeholder="Enter Room ID">
+          <button id="join-room-btn">Join Room</button>
+        </div>
+      </div>
+      <p id="room-info"></p>
+    </div>
+
+    <!-- Player area (hidden until in a room) -->
+    <div id="player-area" style="display: none;">
+      <div id="room-display">Room: <span id="room-id-display"></span></div>
+      <div id="video-input-area">
+        <input type="text" id="youtube-url" placeholder="Paste YouTube URL (host only)" disabled>
+        <button id="load-video-btn" disabled>Load Video</button>
+      </div>
+      <div id="youtube-player"></div>
+      <p id="status">Waiting for host to load a video...</p>
+    </div>
+  </div>
+
+  <!-- YouTube IFrame API -->
+  <script src="https://www.youtube.com/iframe_api"></script>
+  <!-- Socket.IO client -->
+  <script src="/socket.io/socket.io.js"></script>
+  <!-- Our client logic -->
+  <script src="client.js"></script>
+</body>
+</html>

@@ -1,0 +1,42 @@
+body {
+  font-family: Arial, sans-serif;
+  text-align: center;
+  background: #121212;
+  color: white;
+  margin: 0;
+  padding: 20px;
+}
+
+#room-controls {
+  margin-top: 100px;
+}
+
+button, input {
+  padding: 10px 20px;
+  margin: 10px 5px;
+  font-size: 16px;
+  border: none;
+  border-radius: 5px;
+}
+
+button {
+  background: #ff0000;
+  color: white;
+  cursor: pointer;
+}
+
+button:disabled {
+  background: #555;
+  cursor: not-allowed;
+}
+
+input {
+  background: #333;
+  color: white;
+  border: 1px solid #555;
+}
+
+#youtube-player {
+  margin: 20px auto;
+  max-width: 800px;
+}
