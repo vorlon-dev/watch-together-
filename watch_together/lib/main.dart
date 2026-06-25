@@ -107,6 +107,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
+// ===================== ROOM SCREEN =====================
 class RoomScreen extends StatefulWidget {
   final String roomId;
   final bool isHost;
@@ -153,6 +154,7 @@ class _RoomScreenState extends State<RoomScreen> {
     if (mounted) setState(() => _isFullscreen = false);
   }
 
+  // ---------- WebView ----------
   void _createWebViewController() {
     _webViewController = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
@@ -176,9 +178,7 @@ class _RoomScreenState extends State<RoomScreen> {
           });
           _webViewController.runJavaScript('window.setHost(${widget.isHost})');
           if (_loadedVideoId != null) {
-            _webViewController
-                .runJavaScript('window.loadVideo("$_loadedVideoId")');
-            _enterFullscreen();
+            // already handled by current-video event; nothing else needed
           }
         }
       } catch (e) {
@@ -187,6 +187,7 @@ class _RoomScreenState extends State<RoomScreen> {
     });
   }
 
+  // ---------- Socket.IO ----------
   void _connectSocket() {
     socket = IO.io(SERVER_URL, <String, dynamic>{
       'transports': ['websocket'],
@@ -227,15 +228,17 @@ class _RoomScreenState extends State<RoomScreen> {
       }
     });
 
-    // Viewer receives current video + time
+    // Viewer receives current video with play state
     socket.on('current-video', (data) {
       final videoId = data['videoId'] as String;
       final time = (data['currentTime'] as num?)?.toDouble() ?? 0.0;
+      final playing = data['playing'] as bool? ?? false;
       _loadedVideoId = videoId;
-      debugPrint('Received current-video: $videoId, time: $time');
-      // Use the new function in sync.js
+      debugPrint(
+          'Received current-video: $videoId, time: $time, playing: $playing');
+      // Call the new setCurrentVideo with playing flag
       _webViewController.runJavaScript(
-        'window.setCurrentVideo("$videoId", $time)',
+        'window.setCurrentVideo("$videoId", $time, $playing)',
       );
       if (_isLoading) setState(() => _isLoading = false);
       _enterFullscreen();
@@ -252,7 +255,7 @@ class _RoomScreenState extends State<RoomScreen> {
     }
   }
 
-  // Host buttons
+  // ---------- Host Play / Pause ----------
   Future<void> _hostPlay() async {
     if (!widget.isHost || !_webViewReady) return;
     final timeJs = await _webViewController
@@ -277,6 +280,7 @@ class _RoomScreenState extends State<RoomScreen> {
     _webViewController.runJavaScript('window.pauseVideo()');
   }
 
+  // ---------- Load video ----------
   void _loadVideo() {
     final url = _urlController.text.trim();
     final videoId = _extractVideoId(url);
@@ -306,6 +310,7 @@ class _RoomScreenState extends State<RoomScreen> {
     return match?.group(1);
   }
 
+  // ---------- JavaScript channel ----------
   void _onWebViewMessage(JavaScriptMessage message) {
     final msg = message.message;
     debugPrint('WebView msg: $msg');
@@ -316,15 +321,11 @@ class _RoomScreenState extends State<RoomScreen> {
           _isLoading = false;
         });
         _webViewController.runJavaScript('window.setHost(${widget.isHost})');
-        if (_loadedVideoId != null) {
-          _webViewController
-              .runJavaScript('window.loadVideo("$_loadedVideoId")');
-          _enterFullscreen();
-        }
       }
     }
   }
 
+  // Periodic sync from host
   void _startPeriodicSync() {
     Timer.periodic(const Duration(seconds: 3), (timer) {
       if (!mounted || !widget.isHost || !_webViewReady) return;

@@ -8,7 +8,7 @@ const io = new Server(server);
 
 app.use(express.static('public'));
 
-// roomData: { videoId, currentTime }
+// roomData: { videoId, currentTime, playing }
 const roomData = {};
 
 io.on('connection', (socket) => {
@@ -26,10 +26,14 @@ io.on('connection', (socket) => {
       socket.join(roomId);
       socket.emit('room-joined', roomId);
 
-      // Send current video ID AND time if available
+      // Send current video ID, time, and play state
       const data = roomData[roomId];
       if (data) {
-        socket.emit('current-video', data);
+        socket.emit('current-video', {
+          videoId: data.videoId,
+          currentTime: data.currentTime,
+          playing: data.playing   // <-- NEW
+        });
       }
       console.log(`${socket.id} joined room ${roomId}`);
     } else {
@@ -42,19 +46,26 @@ io.on('connection', (socket) => {
     const roomId = data[0];
     const command = data[1];
 
-    // Update stored video & time
+    // Keep room data up to date
     if (!roomData[roomId]) roomData[roomId] = {};
     if (command.action === 'load') {
       roomData[roomId].videoId = command.videoId;
       roomData[roomId].currentTime = 0;
-    } else if (command.action === 'play' || command.action === 'pause' || command.action === 'seek') {
+      roomData[roomId].playing = false;
+    } else if (command.action === 'play') {
+      roomData[roomId].playing = true;
       if (command.currentTime !== undefined) {
         roomData[roomId].currentTime = command.currentTime;
-      } else if (command.time !== undefined) {
+      }
+    } else if (command.action === 'pause') {
+      roomData[roomId].playing = false;
+      if (command.time !== undefined) {
         roomData[roomId].currentTime = command.time;
       }
-    } else if (command.action === 'sync') {
-      roomData[roomId].currentTime = command.time;
+    } else if (command.action === 'seek' || command.action === 'sync') {
+      if (command.time !== undefined) {
+        roomData[roomId].currentTime = command.time;
+      }
     }
 
     // Broadcast to all other clients in the room

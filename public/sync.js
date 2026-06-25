@@ -38,7 +38,6 @@
         if (isHost) {
           setTimeout(() => sendCommand('playVideo'), 800);
         }
-        // Notify Flutter
         if (window.FlutterBridge) {
           FlutterBridge.postMessage('playerReady');
         }
@@ -54,7 +53,7 @@
     } catch (e) {}
   });
 
-  // ----- helper to send commands to YouTube -----
+  // ----- helper -----
   function sendCommand(func, args) {
     if (!player || !player.contentWindow) return;
     const cmd = { event: 'command', func: func, args: args !== undefined ? [args] : [] };
@@ -71,7 +70,6 @@
   window.pauseVideo = () => sendCommand('pauseVideo');
   window.seekTo = (seconds) => sendCommand('seekTo', seconds);
 
-  // execute a sync command
   function executeCommand(cmd) {
     switch (cmd.action) {
       case 'load':
@@ -96,7 +94,6 @@
     }
   }
 
-  // Called from Dart (viewer) or web client
   window.applySyncCommand = (cmd) => {
     if (!ready) {
       pendingCmd = cmd;
@@ -105,14 +102,18 @@
     executeCommand(cmd);
   };
 
-  // Called when a current video arrives (with time)
-  window.setCurrentVideo = (videoId, videoTime) => {
+  // ** NEW: loads the video AND seeks to the correct time, then plays if the host is playing **
+  window.setCurrentVideo = (videoId, videoTime, hostPlaying) => {
     window.loadVideo(videoId);
-    // After loading, seek to the stored time once ready
-    const seekInterval = setInterval(() => {
+    // Wait until player is ready, then seek and (maybe) play
+    const checkReady = setInterval(() => {
       if (ready) {
-        clearInterval(seekInterval);
+        clearInterval(checkReady);
         window.seekTo(videoTime);
+        if (hostPlaying) {
+          // small delay to ensure seek has taken effect
+          setTimeout(() => window.playVideo(), 200);
+        }
       }
     }, 200);
   };
