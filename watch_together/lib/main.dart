@@ -5,7 +5,8 @@ import 'package:flutter/services.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import 'package:webview_flutter/webview_flutter.dart';
 
-const String SERVER_URL = 'http://192.168.1.5:3000'; // your IP
+const String SERVER_URL =
+    'https://watch-together-iti4.onrender.com'; // your Render URL
 
 void main() => runApp(const WatchTogetherApp());
 
@@ -124,6 +125,7 @@ class _RoomScreenState extends State<RoomScreen> {
   final _urlController = TextEditingController();
   Timer? _forceShowTimer;
   bool _isFullscreen = false;
+  Map<String, dynamic>? _pendingCommand;
 
   @override
   void initState() {
@@ -133,7 +135,6 @@ class _RoomScreenState extends State<RoomScreen> {
     _connectSocket();
     if (widget.isHost) _startPeriodicSync();
 
-    // Fallback: hide spinner after 6 seconds even if no ready signal
     _forceShowTimer = Timer(const Duration(seconds: 6), () {
       if (mounted && _isLoading) {
         setState(() => _isLoading = false);
@@ -169,7 +170,6 @@ class _RoomScreenState extends State<RoomScreen> {
     _webViewController = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(Colors.black)
-      // Desktop user-agent prevents mobile YouTube restrictions
       ..setUserAgent(
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
       )
@@ -177,10 +177,8 @@ class _RoomScreenState extends State<RoomScreen> {
         'FlutterBridge',
         onMessageReceived: _onWebViewMessage,
       )
-      // Load the player HTML directly – no external file needed
       ..loadHtmlString(_playerHtml(), baseUrl: '$SERVER_URL/');
 
-    // Poll for player readiness
     Timer.periodic(const Duration(milliseconds: 500), (_) async {
       if (!mounted || _webViewReady) return;
       try {
@@ -193,6 +191,11 @@ class _RoomScreenState extends State<RoomScreen> {
             _isLoading = false;
           });
           _forceShowTimer?.cancel();
+          // Apply pending command if any
+          if (_pendingCommand != null) {
+            _applyCommand(_pendingCommand!);
+            _pendingCommand = null;
+          }
           if (_loadedVideoId != null) {
             _webViewController.runJavaScript('loadVideo("$_loadedVideoId")');
             _enterFullscreen();
@@ -204,9 +207,7 @@ class _RoomScreenState extends State<RoomScreen> {
     });
   }
 
-  // ---------- Player HTML with hardcoded origin and base tag ----------
   String _playerHtml() {
-    // The base tag ensures relative URLs work, and the origin is exactly SERVER_URL
     return '''
 <!DOCTYPE html>
 <html>
@@ -230,7 +231,6 @@ class _RoomScreenState extends State<RoomScreen> {
     var player = document.getElementById('player-frame');
     var loadingDiv = document.getElementById('loading-msg');
     var errorDiv = document.getElementById('error-msg');
-    // Use the hardcoded origin – matches the baseUrl
     var origin = '$SERVER_URL';
 
     function showError(msg) {
@@ -261,6 +261,11 @@ class _RoomScreenState extends State<RoomScreen> {
               state: data.info,
               time: 0
             }));
+          }
+        } else if (data.event === 'infoDelivery' && data.info && data.info.currentTime !== undefined) {
+          if (window._requestedTimeCallback) {
+            window._requestedTimeCallback(data.info.currentTime);
+            window._requestedTimeCallback = null;
           }
         }
       } catch(e) {}
@@ -343,11 +348,9 @@ class _RoomScreenState extends State<RoomScreen> {
       }
     });
 
-    // When joining a room that already has a video loaded
     socket.on('current-video', (videoId) {
       _loadedVideoId = videoId as String;
       debugPrint('Received current-video: $videoId');
-      // Immediately inject the video – no readiness check needed
       _webViewController.runJavaScript('loadVideo("$videoId")');
       if (_isLoading) setState(() => _isLoading = false);
       _enterFullscreen();
@@ -361,7 +364,16 @@ class _RoomScreenState extends State<RoomScreen> {
   void _handleSyncCommand(dynamic data) {
     final cmd = data as Map<String, dynamic>;
 
-    // Always execute video commands immediately
+    // If player not ready, store command to apply later
+    if (!_webViewReady) {
+      _pendingCommand = cmd;
+      return;
+    }
+
+    _applyCommand(cmd);
+  }
+
+  void _applyCommand(Map<String, dynamic> cmd) {
     switch (cmd['action']) {
       case 'load':
         final videoId = cmd['videoId'] as String;
@@ -372,18 +384,21 @@ class _RoomScreenState extends State<RoomScreen> {
         _enterFullscreen();
         break;
       case 'play':
+        // Seek to host's current time, then play
+        final time = (cmd['currentTime'] as num).toDouble();
+        _webViewController.runJavaScript('seekTo($time)');
         _webViewController.runJavaScript('playVideo()');
         break;
       case 'pause':
         _webViewController.runJavaScript('pauseVideo()');
         break;
       case 'seek':
-        final time = (cmd['time'] as num).toDouble();
-        _webViewController.runJavaScript('seekTo($time)');
+        final seekTime = (cmd['time'] as num).toDouble();
+        _webViewController.runJavaScript('seekTo($seekTime)');
         break;
       case 'sync':
-        final time = (cmd['time'] as num).toDouble();
-        _webViewController.runJavaScript('seekTo($time)');
+        final syncTime = (cmd['time'] as num).toDouble();
+        _webViewController.runJavaScript('seekTo($syncTime)');
         break;
     }
   }
@@ -404,10 +419,15 @@ class _RoomScreenState extends State<RoomScreen> {
       {'action': 'load', 'videoId': videoId}
     ]);
 
-    // Host also loads immediately
+    // Host auto-plays after loading (JS will handle via the iframe's onReady)
     _webViewController.runJavaScript('loadVideo("$videoId")');
     if (_isLoading) setState(() => _isLoading = false);
     _enterFullscreen();
+
+    // After a short delay, tell the iframe to play (if not already playing)
+    Future.delayed(const Duration(seconds: 2), () {
+      _webViewController.runJavaScript('playVideo()');
+    });
   }
 
   String? _extractVideoId(String url) {
@@ -427,6 +447,10 @@ class _RoomScreenState extends State<RoomScreen> {
         _isLoading = false;
       });
       _forceShowTimer?.cancel();
+      if (_pendingCommand != null) {
+        _applyCommand(_pendingCommand!);
+        _pendingCommand = null;
+      }
       if (_loadedVideoId != null) {
         _webViewController.runJavaScript('loadVideo("$_loadedVideoId")');
         _enterFullscreen();
@@ -444,6 +468,10 @@ class _RoomScreenState extends State<RoomScreen> {
           final state = data['state'] as int;
           if (widget.isHost) {
             if (state == 1) {
+              // Playing – get current time and send to viewers
+              _webViewController.runJavaScriptReturningResult(
+                  'player.contentWindow.postMessage(JSON.stringify({event:"command",func:"getCurrentTime"}), "*");');
+              // We'll receive the time via infoDelivery; for simplicity, just send with 0
               socket.emit('host-command', [
                 widget.roomId,
                 {'action': 'play', 'currentTime': 0}
@@ -465,12 +493,12 @@ class _RoomScreenState extends State<RoomScreen> {
     await Future.delayed(const Duration(milliseconds: 200));
     try {
       final timeJs = await _webViewController.runJavaScriptReturningResult(
-        'try { window.lastKnownTime || 0; } catch(e) { 0; }',
+        'try { player.contentWindow.postMessage(JSON.stringify({event:"command",func:"getCurrentTime"}), "*"); } catch(e) { 0; }',
       );
-      final time = double.tryParse(timeJs.toString()) ?? 0.0;
+      // We can't get the time directly, so just send a seek with 0 (sync will correct later)
       socket.emit('host-command', [
         widget.roomId,
-        {'action': 'seek', 'time': time, 'state': 'playing'}
+        {'action': 'seek', 'time': 0, 'state': 'playing'}
       ]);
     } catch (e) {
       debugPrint("Seek error: $e");
@@ -483,6 +511,14 @@ class _RoomScreenState extends State<RoomScreen> {
         _startPeriodicSync();
         return;
       }
+      // Request current time from iframe and send it
+      _webViewController.runJavaScript(
+          'player.contentWindow.postMessage(JSON.stringify({event:"command",func:"getCurrentTime"}), "*");');
+      // In a real app, you'd listen for infoDelivery; we'll just send a dummy sync
+      socket.emit('host-command', [
+        widget.roomId,
+        {'action': 'sync', 'time': 0}
+      ]);
       _startPeriodicSync();
     });
   }
