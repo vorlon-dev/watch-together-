@@ -5,8 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import 'package:webview_flutter/webview_flutter.dart';
 
-const String SERVER_URL =
-    'https://watch-together-iti4.onrender.com'; // your Render URL
+const String SERVER_URL = 'https://watch-together-iti4.onrender.com';
 
 void main() => runApp(const WatchTogetherApp());
 
@@ -108,6 +107,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
+// ===================== ROOM SCREEN =====================
 class RoomScreen extends StatefulWidget {
   final String roomId;
   final bool isHost;
@@ -135,7 +135,7 @@ class _RoomScreenState extends State<RoomScreen> {
     _connectSocket();
     if (widget.isHost) _startPeriodicSync();
 
-    _forceShowTimer = Timer(const Duration(seconds: 6), () {
+    _forceShowTimer = Timer(const Duration(seconds: 8), () {
       if (mounted && _isLoading) {
         setState(() => _isLoading = false);
         if (_loadedVideoId != null) {
@@ -170,9 +170,6 @@ class _RoomScreenState extends State<RoomScreen> {
     _webViewController = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(Colors.black)
-      ..setUserAgent(
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
-      )
       ..addJavaScriptChannel(
         'FlutterBridge',
         onMessageReceived: _onWebViewMessage,
@@ -185,13 +182,12 @@ class _RoomScreenState extends State<RoomScreen> {
         final res = await _webViewController
             .runJavaScriptReturningResult('window.__playerReady');
         if (res.toString() == 'true') {
-          debugPrint("Player ready detected via polling");
+          debugPrint("✅ Player ready (polling)");
           setState(() {
             _webViewReady = true;
             _isLoading = false;
           });
           _forceShowTimer?.cancel();
-          // Apply pending command if any
           if (_pendingCommand != null) {
             _applyCommand(_pendingCommand!);
             _pendingCommand = null;
@@ -218,74 +214,54 @@ class _RoomScreenState extends State<RoomScreen> {
     body, html { margin:0; padding:0; width:100%; height:100%; background:#000; overflow:hidden; }
     #player-frame { width:100%; height:100%; border:none; }
     #loading-msg { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); color:#fff; font-size:18px; }
-    #error-msg { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); color:red; font-size:16px; display:none; }
   </style>
 </head>
 <body>
-  <div id="loading-msg">Loading player...</div>
-  <div id="error-msg"></div>
+  <div id="loading-msg">Loading player…</div>
   <iframe id="player-frame" allowfullscreen></iframe>
 
   <script>
     window.__playerReady = false;
+    window.__currentTime = 0;
     var player = document.getElementById('player-frame');
-    var loadingDiv = document.getElementById('loading-msg');
-    var errorDiv = document.getElementById('error-msg');
     var origin = '$SERVER_URL';
 
-    function showError(msg) {
-      loadingDiv.style.display = 'none';
-      errorDiv.style.display = 'block';
-      errorDiv.textContent = msg;
+    setTimeout(function() {
       window.__playerReady = true;
-      if (window.FlutterBridge) {
-        FlutterBridge.postMessage(JSON.stringify({event: 'error', message: msg}));
+      document.getElementById('loading-msg').style.display = 'none';
+    }, 3000);
+
+    setInterval(function() {
+      if (player && player.contentWindow) {
+        player.contentWindow.postMessage('{"event":"command","func":"getCurrentTime","args":""}', '*');
       }
-    }
+    }, 500);
 
     window.addEventListener('message', function(event) {
       if (event.origin !== 'https://www.youtube.com') return;
       try {
         var data = JSON.parse(event.data);
-        if (data.event === 'onReady') {
-          window.__playerReady = true;
-          loadingDiv.style.display = 'none';
-          errorDiv.style.display = 'none';
-          if (window.FlutterBridge) {
-            FlutterBridge.postMessage('playerReady');
-          }
+        if (data.event === 'infoDelivery' && data.info && data.info.currentTime !== undefined) {
+          window.__currentTime = data.info.currentTime;
         } else if (data.event === 'onStateChange') {
           if (window.FlutterBridge) {
             FlutterBridge.postMessage(JSON.stringify({
               event: 'stateChange',
               state: data.info,
-              time: 0
+              time: window.__currentTime
             }));
-          }
-        } else if (data.event === 'infoDelivery' && data.info && data.info.currentTime !== undefined) {
-          if (window._requestedTimeCallback) {
-            window._requestedTimeCallback(data.info.currentTime);
-            window._requestedTimeCallback = null;
           }
         }
       } catch(e) {}
     });
 
     function loadVideo(videoId) {
-      loadingDiv.style.display = 'block';
-      errorDiv.style.display = 'none';
+      document.getElementById('loading-msg').style.display = 'block';
       var src = 'https://www.youtube.com/embed/' + videoId + '?enablejsapi=1&origin=' + encodeURIComponent(origin) + '&controls=1&playsinline=1';
       player.src = src;
-
       setTimeout(function() {
-        if (!window.__playerReady) {
-          window.__playerReady = true;
-          loadingDiv.style.display = 'none';
-          if (window.FlutterBridge) {
-            FlutterBridge.postMessage('playerReady');
-          }
-        }
-      }, 5000);
+        playVideo();
+      }, 1500);
     }
 
     function playVideo() {
@@ -316,6 +292,7 @@ class _RoomScreenState extends State<RoomScreen> {
     });
 
     socket.onConnect((_) {
+      debugPrint('✅ Connected to server');
       if (widget.isHost) {
         socket.emit('create-room', widget.roomId);
       } else {
@@ -363,13 +340,10 @@ class _RoomScreenState extends State<RoomScreen> {
 
   void _handleSyncCommand(dynamic data) {
     final cmd = data as Map<String, dynamic>;
-
-    // If player not ready, store command to apply later
     if (!_webViewReady) {
       _pendingCommand = cmd;
       return;
     }
-
     _applyCommand(cmd);
   }
 
@@ -378,14 +352,12 @@ class _RoomScreenState extends State<RoomScreen> {
       case 'load':
         final videoId = cmd['videoId'] as String;
         _loadedVideoId = videoId;
-        debugPrint('Sync load: $videoId');
         _webViewController.runJavaScript('loadVideo("$videoId")');
         if (_isLoading) setState(() => _isLoading = false);
         _enterFullscreen();
         break;
       case 'play':
-        // Seek to host's current time, then play
-        final time = (cmd['currentTime'] as num).toDouble();
+        final time = (cmd['currentTime'] as num?)?.toDouble() ?? 0.0;
         _webViewController.runJavaScript('seekTo($time)');
         _webViewController.runJavaScript('playVideo()');
         break;
@@ -393,14 +365,37 @@ class _RoomScreenState extends State<RoomScreen> {
         _webViewController.runJavaScript('pauseVideo()');
         break;
       case 'seek':
-        final seekTime = (cmd['time'] as num).toDouble();
+        final seekTime = (cmd['time'] as num?)?.toDouble() ?? 0.0;
         _webViewController.runJavaScript('seekTo($seekTime)');
         break;
       case 'sync':
-        final syncTime = (cmd['time'] as num).toDouble();
+        final syncTime = (cmd['time'] as num?)?.toDouble() ?? 0.0;
         _webViewController.runJavaScript('seekTo($syncTime)');
         break;
     }
+  }
+
+  // ---------- HOST custom buttons actions ----------
+  Future<void> _hostPlay() async {
+    final timeJs = await _webViewController
+        .runJavaScriptReturningResult('window.__currentTime');
+    final time = double.tryParse(timeJs.toString()) ?? 0.0;
+    socket.emit('host-command', [
+      widget.roomId,
+      {'action': 'play', 'currentTime': time}
+    ]);
+    _webViewController.runJavaScript('playVideo()');
+  }
+
+  Future<void> _hostPause() async {
+    final timeJs = await _webViewController
+        .runJavaScriptReturningResult('window.__currentTime');
+    final time = double.tryParse(timeJs.toString()) ?? 0.0;
+    socket.emit('host-command', [
+      widget.roomId,
+      {'action': 'pause', 'time': time}
+    ]);
+    _webViewController.runJavaScript('pauseVideo()');
   }
 
   void _loadVideo() {
@@ -419,15 +414,9 @@ class _RoomScreenState extends State<RoomScreen> {
       {'action': 'load', 'videoId': videoId}
     ]);
 
-    // Host auto-plays after loading (JS will handle via the iframe's onReady)
     _webViewController.runJavaScript('loadVideo("$videoId")');
     if (_isLoading) setState(() => _isLoading = false);
     _enterFullscreen();
-
-    // After a short delay, tell the iframe to play (if not already playing)
-    Future.delayed(const Duration(seconds: 2), () {
-      _webViewController.runJavaScript('playVideo()');
-    });
   }
 
   String? _extractVideoId(String url) {
@@ -438,7 +427,7 @@ class _RoomScreenState extends State<RoomScreen> {
     return match?.group(1);
   }
 
-  void _onWebViewMessage(JavaScriptMessage message) {
+  void _onWebViewMessage(JavaScriptMessage message) async {
     final msg = message.message;
     debugPrint('WebView msg: $msg');
     if (msg == 'playerReady') {
@@ -458,25 +447,20 @@ class _RoomScreenState extends State<RoomScreen> {
     } else if (msg.startsWith('{')) {
       try {
         final data = jsonDecode(msg) as Map<String, dynamic>;
-        if (data['event'] == 'error') {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text(data['message'] ?? 'Video load error')),
-            );
-          }
-        } else if (data['event'] == 'stateChange') {
+        if (data['event'] == 'stateChange') {
           final state = data['state'] as int;
           if (widget.isHost) {
             if (state == 1) {
-              // Playing – get current time and send to viewers
-              _webViewController.runJavaScriptReturningResult(
-                  'player.contentWindow.postMessage(JSON.stringify({event:"command",func:"getCurrentTime"}), "*");');
-              // We'll receive the time via infoDelivery; for simplicity, just send with 0
+              // playing
+              final timeJs = await _webViewController
+                  .runJavaScriptReturningResult('window.__currentTime');
+              final time = double.tryParse(timeJs.toString()) ?? 0.0;
               socket.emit('host-command', [
                 widget.roomId,
-                {'action': 'play', 'currentTime': 0}
+                {'action': 'play', 'currentTime': time}
               ]);
             } else if (state == 2) {
+              // paused
               socket.emit('host-command', [
                 widget.roomId,
                 {'action': 'pause'}
@@ -490,15 +474,14 @@ class _RoomScreenState extends State<RoomScreen> {
 
   void _onPointerUp(PointerUpEvent event) async {
     if (!widget.isHost || !_webViewReady) return;
-    await Future.delayed(const Duration(milliseconds: 200));
+    await Future.delayed(const Duration(milliseconds: 300));
     try {
-      final timeJs = await _webViewController.runJavaScriptReturningResult(
-        'try { player.contentWindow.postMessage(JSON.stringify({event:"command",func:"getCurrentTime"}), "*"); } catch(e) { 0; }',
-      );
-      // We can't get the time directly, so just send a seek with 0 (sync will correct later)
+      final timeJs = await _webViewController
+          .runJavaScriptReturningResult('window.__currentTime');
+      final time = double.tryParse(timeJs.toString()) ?? 0.0;
       socket.emit('host-command', [
         widget.roomId,
-        {'action': 'seek', 'time': 0, 'state': 'playing'}
+        {'action': 'seek', 'time': time, 'state': 'playing'}
       ]);
     } catch (e) {
       debugPrint("Seek error: $e");
@@ -506,19 +489,20 @@ class _RoomScreenState extends State<RoomScreen> {
   }
 
   void _startPeriodicSync() {
-    Future.delayed(const Duration(seconds: 10), () {
-      if (!mounted || !widget.isHost) {
+    Future.delayed(const Duration(seconds: 5), () async {
+      if (!mounted || !widget.isHost || !_webViewReady) {
         _startPeriodicSync();
         return;
       }
-      // Request current time from iframe and send it
-      _webViewController.runJavaScript(
-          'player.contentWindow.postMessage(JSON.stringify({event:"command",func:"getCurrentTime"}), "*");');
-      // In a real app, you'd listen for infoDelivery; we'll just send a dummy sync
-      socket.emit('host-command', [
-        widget.roomId,
-        {'action': 'sync', 'time': 0}
-      ]);
+      try {
+        final timeJs = await _webViewController
+            .runJavaScriptReturningResult('window.__currentTime');
+        final time = double.tryParse(timeJs.toString()) ?? 0.0;
+        socket.emit('host-command', [
+          widget.roomId,
+          {'action': 'sync', 'time': time}
+        ]);
+      } catch (_) {}
       _startPeriodicSync();
     });
   }
@@ -564,19 +548,46 @@ class _RoomScreenState extends State<RoomScreen> {
                   ],
                 ),
               ),
-            if (_isLoading)
-              const Expanded(
-                child: Center(
-                  child: CircularProgressIndicator(color: Colors.red),
-                ),
-              )
-            else
-              Expanded(
-                child: Listener(
-                  onPointerUp: _onPointerUp,
-                  child: WebViewWidget(controller: _webViewController),
-                ),
+            // Player area with custom host buttons
+            Expanded(
+              child: Stack(
+                children: [
+                  if (_isLoading)
+                    const Center(
+                      child: CircularProgressIndicator(color: Colors.red),
+                    )
+                  else
+                    WebViewWidget(controller: _webViewController),
+                  // Custom Play / Pause overlay (only for host)
+                  if (widget.isHost && !_isLoading)
+                    Positioned(
+                      bottom: 20,
+                      right: 20,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          FloatingActionButton(
+                            heroTag: 'play',
+                            mini: true,
+                            backgroundColor: Colors.white.withOpacity(0.7),
+                            onPressed: _hostPlay,
+                            child: const Icon(Icons.play_arrow,
+                                color: Colors.black),
+                          ),
+                          const SizedBox(height: 10),
+                          FloatingActionButton(
+                            heroTag: 'pause',
+                            mini: true,
+                            backgroundColor: Colors.white.withOpacity(0.7),
+                            onPressed: _hostPause,
+                            child: const Icon(Icons.pause, color: Colors.black),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
               ),
+            ),
           ],
         ),
       ),

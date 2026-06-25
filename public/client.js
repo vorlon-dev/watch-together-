@@ -1,12 +1,11 @@
 // public/client.js
 
 let socket;
-let player;        // the iframe element
+let player;
 let isHost = false;
 let roomId = null;
 let videoId = null;
 let playerReady = false;
-let pendingCommand = null;   // store the last play/pause/seek command
 
 socket = io();
 
@@ -19,6 +18,19 @@ const roomIdDisplay = document.getElementById('room-id-display');
 const youtubeUrlInput = document.getElementById('youtube-url');
 const loadVideoBtn = document.getElementById('load-video-btn');
 const statusText = document.getElementById('status');
+
+// ---------- Custom control buttons (only for host) ----------
+const hostControls = document.createElement('div');
+hostControls.id = 'host-controls';
+hostControls.style.display = 'none';
+hostControls.innerHTML = `
+  <button id="btn-play" style="margin:5px; padding:10px 20px; font-size:16px;">▶ Play</button>
+  <button id="btn-pause" style="margin:5px; padding:10px 20px; font-size:16px;">⏸️ Pause</button>
+`;
+document.getElementById('app').appendChild(hostControls);
+
+const btnPlay = document.getElementById('btn-play');
+const btnPause = document.getElementById('btn-pause');
 
 // ---------- Room handling ----------
 createRoomBtn.addEventListener('click', () => {
@@ -48,9 +60,7 @@ socket.on('room-error', (msg) => {
   alert(msg);
 });
 
-// ---------- When joining a room that already has a video loaded ----------
 socket.on('current-video', (videoIdFromServer) => {
-  console.log('✅ Received current-video:', videoIdFromServer);
   videoId = videoIdFromServer;
   loadVideoDirect(videoId);
   statusText.textContent = 'Video loaded. Syncing...';
@@ -64,8 +74,10 @@ function enterRoom(id) {
   if (isHost) {
     youtubeUrlInput.disabled = false;
     loadVideoBtn.disabled = false;
+    hostControls.style.display = 'block';
     statusText.textContent = 'You are the host. Load a video to start.';
   } else {
+    hostControls.style.display = 'none';
     statusText.textContent = 'Joining room...';
   }
 
@@ -92,17 +104,10 @@ function initPlayer() {
       const data = JSON.parse(event.data);
       if (data.event === 'onReady') {
         playerReady = true;
-        console.log('🎬 Player ready');
-        // Apply any pending command (play/pause/seek)
-        if (pendingCommand) {
-          executeCommand(pendingCommand);
-          pendingCommand = null;
-        }
         statusText.textContent = 'Player ready.';
       } else if (data.event === 'onStateChange') {
         if (isHost) {
           if (data.info === 1) { // playing
-            // Send current time to viewers for sync
             requestCurrentTime((currentTime) => {
               socket.emit('host-command', [roomId, { action: 'play', currentTime }]);
             });
@@ -111,7 +116,6 @@ function initPlayer() {
           }
         }
       } else if (data.event === 'infoDelivery' && data.info && data.info.currentTime !== undefined) {
-        // Response to getCurrentTime request
         if (window._requestedTimeCallback) {
           window._requestedTimeCallback(data.info.currentTime);
           window._requestedTimeCallback = null;
@@ -127,31 +131,26 @@ function loadVideoDirect(videoId) {
   if (!player) return;
   const origin = window.location.origin;
   const src = `https://www.youtube.com/embed/${videoId}?enablejsapi=1&origin=${encodeURIComponent(origin)}&controls=1&playsinline=1`;
-  console.log('📺 Loading video:', videoId);
   player.src = src;
 
-  // If host, auto-play after a short delay to let player initialise
   if (isHost) {
     setTimeout(() => {
       playVideo();
       statusText.textContent = 'Playing...';
-    }, 1000);  // wait 1 second for player to be ready
+    }, 1000);
   } else {
-    // Viewer: we'll wait for the 'play' command from host, or auto-play after 3 seconds as fallback
     setTimeout(() => {
       if (!playerReady && !pendingCommand) {
-        playVideo();  // fallback auto-play
+        playVideo();
       }
     }, 3000);
   }
 }
 
-// Helper: request current time from YouTube player
 function requestCurrentTime(callback) {
   if (player && player.contentWindow) {
     player.contentWindow.postMessage('{"event":"command","func":"getCurrentTime","args":""}', '*');
     window._requestedTimeCallback = callback;
-    // fallback if no response
     setTimeout(() => {
       if (window._requestedTimeCallback) {
         window._requestedTimeCallback(0);
@@ -179,21 +178,24 @@ function seekTo(seconds) {
   }
 }
 
-function executeCommand(cmd) {
-  switch (cmd.action) {
-    case 'play':
-      playVideo();
-      break;
-    case 'pause':
-      pauseVideo();
-      break;
-    case 'seek':
-      seekTo(cmd.time);
-      break;
-  }
-}
+// ---------- Custom button actions ----------
+btnPlay.addEventListener('click', () => {
+  if (!isHost || !player || !playerReady) return;
+  requestCurrentTime((currentTime) => {
+    socket.emit('host-command', [roomId, { action: 'play', currentTime }]);
+    playVideo();
+  });
+});
 
-// ---------- Host: load a video ----------
+btnPause.addEventListener('click', () => {
+  if (!isHost || !player || !playerReady) return;
+  requestCurrentTime((currentTime) => {
+    socket.emit('host-command', [roomId, { action: 'pause', time: currentTime }]);
+    pauseVideo();
+  });
+});
+
+// ---------- Host load ----------
 loadVideoBtn.addEventListener('click', () => {
   const url = youtubeUrlInput.value.trim();
   videoId = extractVideoId(url);
@@ -211,12 +213,10 @@ function extractVideoId(url) {
   return match ? match[1] : null;
 }
 
-// ---------- Viewer sync: handle commands from host ----------
+// ---------- Viewer sync ----------
 socket.on('sync-command', (command) => {
-  console.log('📨 Received sync command:', command);
   if (!player) return;
 
-  // If player isn't ready yet, store command to apply later
   if (!playerReady) {
     pendingCommand = command;
     return;
@@ -226,10 +226,8 @@ socket.on('sync-command', (command) => {
     case 'load':
       videoId = command.videoId;
       loadVideoDirect(command.videoId);
-      statusText.textContent = 'Video loaded. Syncing...';
       break;
     case 'play':
-      // Seek to host's current time, then play
       seekTo(command.currentTime);
       playVideo();
       break;
@@ -245,7 +243,7 @@ socket.on('sync-command', (command) => {
   }
 });
 
-// ---------- Host seek detection (mouseup on player) ----------
+// ---------- Host seek detection ----------
 document.addEventListener('mouseup', (e) => {
   if (!isHost || !player || !playerReady || !roomId) return;
   const playerElement = document.getElementById('youtube-player');
@@ -255,18 +253,18 @@ document.addEventListener('mouseup', (e) => {
         socket.emit('host-command', [roomId, {
           action: 'seek',
           time: currentTime,
-          state: 'playing'   // we assume playing while seeking
+          state: 'playing'
         }]);
       });
     }, 100);
   }
 });
 
-// ---------- Periodic sync (host sends time every 10s) ----------
+// ---------- Periodic sync ----------
 setInterval(() => {
   if (isHost && player && playerReady && roomId) {
     requestCurrentTime((currentTime) => {
       socket.emit('host-command', [roomId, { action: 'sync', time: currentTime }]);
     });
   }
-}, 10000);
+}, 5000);
